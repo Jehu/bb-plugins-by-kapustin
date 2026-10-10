@@ -226,8 +226,15 @@ function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; o
           <div className="flex items-center gap-2">
             <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
               <RoleCheckbox disabled={busy} checked={inherit} onChange={(e) => {
-                if (e.target.checked) { set("providerId", null); set("model", null); set("reasoningLevel", null); }
-                else { set("providerId", "claude-code"); set("model", "claude-sonnet-5"); set("reasoningLevel", "medium"); }
+                if (e.target.checked) {
+                  set("providerId", null);
+                  set("model", null);
+                  set("reasoningLevel", null);
+                } else {
+                  set("providerId", "");
+                  set("model", "");
+                  set("reasoningLevel", "medium");
+                }
               }} />
               inherit from parent
             </label>
