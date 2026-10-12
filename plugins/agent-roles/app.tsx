@@ -13,7 +13,6 @@ import {
   ThreadChat,
   definePluginApp,
   experimental_PermissionModePicker as PermissionModePicker,
-  experimental_ProviderModelPicker as ProviderModelPicker,
   useBbContext,
   useBbNavigate,
   useRealtime,
@@ -23,7 +22,7 @@ import { toast } from "sonner";
 import type { Role, RoleTask, Team, TeamRun, TeamRunWithSteps, rpcContract } from "./server";
 import { GraphCanvas } from "./graph-canvas";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { ROLES_CHANGED, ROLE_COLORS, RUNS_CHANGED, SLUG_RE, graphLayers, validateGraph, connectGraph, type RoleColor } from "./shared";
+import { ROLES_CHANGED, ROLE_COLORS, RUNS_CHANGED, SLUG_RE, REASONING_LEVELS, graphLayers, validateGraph, connectGraph, type RoleColor } from "./shared";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
@@ -191,6 +190,51 @@ function RoleCheckbox({ className, ...props }: Omit<ComponentProps<"input">, "ty
   );
 }
 
+type ExecModel = { id: string; displayName?: string; supportedReasoningEfforts?: Array<{ reasoningEffort: string }> };
+/** Minimal provider/model/reasoning picker against bb's execution-options API.
+ *  Works around experimental_ProviderModelPicker not emitting onChange in plugin panels (SDK 0.6.37). */
+function SimpleModelPicker({ value, onChange }: {
+  value: { providerId: string; model: string; reasoningLevel: string };
+  onChange: (v: { providerId: string; model: string; reasoningLevel: string }) => void;
+}) {
+  const [providers, setProviders] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [models, setModels] = useState<ExecModel[]>([]);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const load = (providerId: string) => {
+    fetch(`/api/v1/system/execution-options?providerId=${encodeURIComponent(providerId)}`)
+      .then((r) => r.json())
+      .then((d: { models?: ExecModel[] }) => { setModels(d.models ?? []); setModelError(null); })
+      .catch(() => setModelError("Could not load models for this provider."));
+  };
+  useEffect(() => {
+    fetch("/api/v1/system/execution-options")
+      .then((r) => r.json())
+      .then((d: { providers?: Array<{ id: string; displayName: string }> }) => setProviders(d.providers ?? []))
+      .catch(() => setModelError("Could not load providers."));
+    load(value.providerId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const sel = { minHeight: "1.75rem", padding: "0 0.5rem", border: "1px solid var(--border, #ccc)", borderRadius: "0.375rem", background: "transparent", color: "inherit", fontSize: "0.8rem", maxWidth: "16rem" } as const;
+  const current = models.find((m) => m.id === value.model);
+  const efforts = (current?.supportedReasoningEfforts ?? [{ reasoningEffort: "medium" }]).map((e) => e.reasoningEffort).filter((e) => (REASONING_LEVELS as readonly string[]).includes(e));
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <select style={sel} value={value.providerId} onChange={(e) => { const providerId = e.target.value; onChange({ providerId, model: "", reasoningLevel: value.reasoningLevel }); load(providerId); }}>
+        {providers.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+        {!providers.some((p) => p.id === value.providerId) ? <option value={value.providerId}>{value.providerId}</option> : null}
+      </select>
+      <select style={sel} value={value.model} onChange={(e) => onChange({ ...value, model: e.target.value })}>
+        {value.model && !models.some((m) => m.id === value.model) ? <option value={value.model}>{value.model}</option> : null}
+        {models.map((m) => <option key={m.id} value={m.id}>{m.displayName ?? m.id}</option>)}
+      </select>
+      <select style={sel} value={value.reasoningLevel} onChange={(e) => onChange({ ...value, reasoningLevel: e.target.value })}>
+        {(efforts.length ? efforts : ["medium"]).map((l) => <option key={l} value={l}>{l}</option>)}
+      </select>
+      {modelError ? <span className="text-xs text-destructive">{modelError}</span> : null}
+    </span>
+  );
+}
+
 type ModelDefaults = { providerId: string; model: string; reasoningLevel: string };
 const FALLBACK_DEFAULTS: ModelDefaults = { providerId: "claude-code", model: "claude-opus-5[1m]", reasoningLevel: "medium" };
 function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; onSave: (draft: RoleDraft) => void; onCancel: () => void; busy: boolean }) {
@@ -250,9 +294,9 @@ function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; o
               inherit from parent
             </label>
             {!inherit ? (
-              <ProviderModelPicker
+              <SimpleModelPicker
                 value={{ providerId: d.providerId!, model: d.model!, reasoningLevel: d.reasoningLevel ?? "medium" }}
-                onChange={(v) => { set("providerId", v.providerId); set("model", v.model); set("reasoningLevel", v.reasoningLevel); }}
+                onChange={(v) => { set("providerId", v.providerId); set("model", v.model); set("reasoningLevel", v.reasoningLevel as RoleDraft["reasoningLevel"]); }}
               />
             ) : null}
           </div>
