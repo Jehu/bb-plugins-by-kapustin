@@ -191,9 +191,16 @@ function RoleCheckbox({ className, ...props }: Omit<ComponentProps<"input">, "ty
   );
 }
 
+type ModelDefaults = { providerId: string; model: string; reasoningLevel: string };
+const FALLBACK_DEFAULTS: ModelDefaults = { providerId: "claude-code", model: "claude-opus-5[1m]", reasoningLevel: "medium" };
 function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; onSave: (draft: RoleDraft) => void; onCancel: () => void; busy: boolean }) {
+  const rpc = useRpc<typeof rpcContract>();
   const [d, setD] = useState<RoleDraft>(initial);
   const [slugTouched, setSlugTouched] = useState(initial.slug !== "");
+  const [defaults, setDefaults] = useState<ModelDefaults>(FALLBACK_DEFAULTS);
+  useEffect(() => {
+    rpc.call("model_defaults").then(setDefaults).catch(() => undefined);
+  }, [rpc]);
   const inherit = d.providerId === null || d.model === null;
   const set = <K extends keyof RoleDraft>(key: K, value: RoleDraft[K]) => setD((prev) => ({ ...prev, [key]: value }));
   const problems = [
@@ -205,7 +212,11 @@ function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; o
   return (
     <form
       className={editorCls}
-      onSubmit={(event) => { event.preventDefault(); if (valid && !busy) onSave(d); }}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid || busy) return;
+        onSave(d.providerId && d.model ? d : { ...d, providerId: null, model: null, reasoningLevel: null });
+      }}
     >
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Name">
@@ -231,9 +242,9 @@ function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; o
                   set("model", null);
                   set("reasoningLevel", null);
                 } else {
-                  set("providerId", "");
-                  set("model", "");
-                  set("reasoningLevel", "medium");
+                  set("providerId", defaults.providerId);
+                  set("model", defaults.model);
+                  set("reasoningLevel", defaults.reasoningLevel as RoleDraft["reasoningLevel"]);
                 }
               }} />
               inherit from parent
