@@ -214,6 +214,15 @@ function SimpleModelPicker({ value, onChange }: {
     load(value.providerId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const [query, setQuery] = useState(value.model);
+  useEffect(() => setQuery(value.model), [value.model]);
+  const needle = query.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (needle ? models.filter((m) => m.id.toLowerCase().includes(needle) || (m.displayName ?? "").toLowerCase().includes(needle)) : models).slice(0, 500),
+    [models, needle],
+  );
+  const commit = (id: string) => { if (id && id !== value.model) onChange({ ...value, model: id }); };
+  const inputCls = "h-[1.75rem] w-56 rounded-md border border-input bg-transparent px-2 text-xs text-foreground";
   const sel = { minHeight: "1.75rem", padding: "0 0.5rem", border: "1px solid var(--border, #ccc)", borderRadius: "0.375rem", background: "transparent", color: "inherit", fontSize: "0.8rem", maxWidth: "16rem" } as const;
   const current = models.find((m) => m.id === value.model);
   const efforts = (current?.supportedReasoningEfforts ?? [{ reasoningEffort: "medium" }]).map((e) => e.reasoningEffort).filter((e) => (REASONING_LEVELS as readonly string[]).includes(e));
@@ -223,10 +232,33 @@ function SimpleModelPicker({ value, onChange }: {
         {providers.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
         {!providers.some((p) => p.id === value.providerId) ? <option value={value.providerId}>{value.providerId}</option> : null}
       </select>
-      <select style={sel} value={value.model} onChange={(e) => onChange({ ...value, model: e.target.value })}>
-        {value.model && !models.some((m) => m.id === value.model) ? <option value={value.model}>{value.model}</option> : null}
-        {models.map((m) => <option key={m.id} value={m.id}>{m.displayName ?? m.id}</option>)}
-      </select>
+      <span className="relative flex flex-col gap-0.5">
+        <input
+          className={inputCls}
+          list="role-model-options"
+          placeholder="Search models…"
+          value={query}
+          title={value.model}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => {
+            const q = e.target.value;
+            setQuery(q);
+            const exact = models.find((m) => m.id === q);
+            if (exact) commit(exact.id);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const pick = models.find((m) => m.id === query) ?? filtered[0];
+              if (pick) { setQuery(pick.id); commit(pick.id); }
+            }
+          }}
+        />
+        <datalist id="role-model-options">
+          {filtered.map((m) => <option key={m.id} value={m.id}>{m.displayName ?? m.id}</option>)}
+        </datalist>
+        <span className="text-[0.65rem] text-muted-foreground">{filtered.length} of {models.length} models{value.model ? ` · selected: ${value.model}` : ""}</span>
+      </span>
       <select style={sel} value={value.reasoningLevel} onChange={(e) => onChange({ ...value, reasoningLevel: e.target.value })}>
         {(efforts.length ? efforts : ["medium"]).map((l) => <option key={l} value={l}>{l}</option>)}
       </select>
