@@ -7,7 +7,7 @@
 //   /plugins/agent-roles/roles/teams      teams (visual DAG constructor)
 //   /plugins/agent-roles/roles/runs       runs
 //   /plugins/agent-roles/roles/runs/<id>  one run
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import {
   ThreadChat,
@@ -198,70 +198,164 @@ function SimpleModelPicker({ value, onChange }: {
   onChange: (v: { providerId: string; model: string; reasoningLevel: string }) => void;
 }) {
   const [providers, setProviders] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [providersLoading, setProvidersLoading] = useState(true);
+  const [providerError, setProviderError] = useState<string | null>(null);
   const [models, setModels] = useState<ExecModel[]>([]);
+  const [modelsProviderId, setModelsProviderId] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
-  const load = (providerId: string) => {
-    fetch(`/api/v1/system/execution-options?providerId=${encodeURIComponent(providerId)}`)
-      .then((r) => r.json())
-      .then((d: { models?: ExecModel[] }) => { setModels(d.models ?? []); setModelError(null); })
-      .catch(() => setModelError("Could not load models for this provider."));
-  };
-  useEffect(() => {
-    fetch("/api/v1/system/execution-options")
-      .then((r) => r.json())
-      .then((d: { providers?: Array<{ id: string; displayName: string }> }) => setProviders(d.providers ?? []))
-      .catch(() => setModelError("Could not load providers."));
-    load(value.providerId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const [query, setQuery] = useState(value.model);
-  useEffect(() => setQuery(value.model), [value.model]);
-  const needle = query.trim().toLowerCase();
-  const filtered = useMemo(
-    () => (needle ? models.filter((m) => m.id.toLowerCase().includes(needle) || (m.displayName ?? "").toLowerCase().includes(needle)) : models).slice(0, 500),
-    [models, needle],
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const listboxId = useId();
+  const optionRefs = useRef<Array<HTMLLIElement | null>>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setProvidersLoading(true);
+    fetch("/api/v1/system/execution-options", { signal: controller.signal })
+      .then((r) => r.json())
+      .then((d: { providers?: Array<{ id: string; displayName: string }> }) => {
+        if (!controller.signal.aborted) {
+          setProviders(d.providers ?? []);
+          setProviderError(null);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setProviderError("Could not load providers.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setProvidersLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const providerId = value.providerId;
+    const controller = new AbortController();
+    setModels([]);
+    setModelsProviderId(null);
+    setModelsLoading(Boolean(providerId));
+    setModelError(null);
+    setOpen(false);
+    setActiveIndex(-1);
+    if (!providerId) return () => controller.abort();
+    fetch(`/api/v1/system/execution-options?providerId=${encodeURIComponent(providerId)}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((d: { models?: ExecModel[] }) => {
+        if (!controller.signal.aborted) {
+          setModels(d.models ?? []);
+          setModelsProviderId(providerId);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setModelError("Could not load models for this provider.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setModelsLoading(false);
+      });
+    return () => controller.abort();
+  }, [value.providerId]);
+
+  useEffect(() => {
+    setQuery(value.model);
+    setActiveIndex(-1);
+  }, [value.model]);
+
+  const searchableModels = useMemo(
+    () => models.map((model) => ({ model, search: `${model.id}\n${model.displayName ?? ""}`.toLowerCase() })),
+    [models],
   );
-  const commit = (id: string) => { if (id && id !== value.model) onChange({ ...value, model: id }); };
+  const needle = query.trim().toLowerCase();
+  const matches = useMemo(
+    () => (modelsProviderId === value.providerId
+      ? searchableModels.filter(({ search }) => !needle || search.includes(needle)).map(({ model }) => model)
+      : []),
+    [modelsProviderId, value.providerId, searchableModels, needle],
+  );
+  const filtered = matches.slice(0, 50);
+
+  useEffect(() => {
+    optionRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  const commit = (model: ExecModel) => {
+    setQuery(model.id);
+    setOpen(false);
+    setActiveIndex(-1);
+    if (model.id !== value.model) onChange({ ...value, model: model.id });
+  };
   const inputCls = "h-[1.75rem] w-56 rounded-md border border-input bg-transparent px-2 text-xs text-foreground";
   const sel = { minHeight: "1.75rem", padding: "0 0.5rem", border: "1px solid var(--border, #ccc)", borderRadius: "0.375rem", background: "transparent", color: "inherit", fontSize: "0.8rem", maxWidth: "16rem" } as const;
-  const current = models.find((m) => m.id === value.model);
+  const current = modelsProviderId === value.providerId ? models.find((m) => m.id === value.model) : undefined;
   const efforts = (current?.supportedReasoningEfforts ?? [{ reasoningEffort: "medium" }]).map((e) => e.reasoningEffort).filter((e) => (REASONING_LEVELS as readonly string[]).includes(e));
+  const status = modelsLoading ? "Loading models…" : `${matches.length} of ${models.length} models${matches.length > filtered.length ? " · refine search for more" : ""}${value.model ? ` · selected: ${value.model}` : ""}`;
   return (
     <span className="flex flex-wrap items-center gap-2">
-      <select style={sel} value={value.providerId} onChange={(e) => { const providerId = e.target.value; onChange({ providerId, model: "", reasoningLevel: value.reasoningLevel }); load(providerId); }}>
+      <select style={sel} value={value.providerId} onChange={(e) => onChange({ providerId: e.target.value, model: "", reasoningLevel: value.reasoningLevel })}>
         {providers.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
         {!providers.some((p) => p.id === value.providerId) ? <option value={value.providerId}>{value.providerId}</option> : null}
       </select>
       <span className="relative flex flex-col gap-0.5">
         <input
           className={inputCls}
-          list="role-model-options"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-activedescendant={activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
           placeholder="Search models…"
           value={query}
           title={value.model}
-          onFocus={(e) => e.currentTarget.select()}
-          onChange={(e) => {
-            const q = e.target.value;
-            setQuery(q);
-            const exact = models.find((m) => m.id === q);
-            if (exact) commit(exact.id);
-          }}
+          onFocus={(e) => { e.currentTarget.select(); setOpen(true); setActiveIndex(-1); }}
+          onBlur={() => { setOpen(false); setActiveIndex(-1); }}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); setActiveIndex(-1); }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "ArrowDown") {
               e.preventDefault();
-              const pick = models.find((m) => m.id === query) ?? filtered[0];
-              if (pick) { setQuery(pick.id); commit(pick.id); }
+              setOpen(true);
+              setActiveIndex((index) => Math.min(index + 1, filtered.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setOpen(true);
+              setActiveIndex((index) => Math.max(index - 1, -1));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              if (activeIndex >= 0 && filtered[activeIndex]) commit(filtered[activeIndex]);
+            } else if (e.key === "Escape" && open) {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpen(false);
+              setActiveIndex(-1);
             }
           }}
         />
-        <datalist id="role-model-options">
-          {filtered.map((m) => <option key={m.id} value={m.id}>{m.displayName ?? m.id}</option>)}
-        </datalist>
-        <span className="text-[0.65rem] text-muted-foreground">{filtered.length} of {models.length} models{value.model ? ` · selected: ${value.model}` : ""}</span>
+        {open ? (
+          <ul id={listboxId} role="listbox" className="absolute bottom-[calc(100%+0.125rem)] z-50 max-h-48 w-80 overflow-y-auto rounded-md border border-input bg-popover py-1 text-xs text-popover-foreground shadow-md">
+            {filtered.map((model, index) => (
+              <li
+                key={model.id}
+                id={`${listboxId}-option-${index}`}
+                ref={(element) => { optionRefs.current[index] = element; }}
+                role="option"
+                aria-selected={index === activeIndex}
+                className={cn("cursor-pointer px-2 py-1.5", index === activeIndex && "bg-accent text-accent-foreground")}
+                onMouseDown={(e) => { e.preventDefault(); commit(model); }}
+              >
+                <span className="block truncate">{model.displayName ?? model.id}</span>
+                {model.displayName ? <span className="block truncate text-[0.65rem] text-muted-foreground">{model.id}</span> : null}
+              </li>
+            ))}
+            {!modelsLoading && filtered.length === 0 ? <li className="px-2 py-1.5 text-muted-foreground">No matching models.</li> : null}
+          </ul>
+        ) : null}
+        <span className="text-[0.65rem] text-muted-foreground">{status}</span>
       </span>
       <select style={sel} value={value.reasoningLevel} onChange={(e) => onChange({ ...value, reasoningLevel: e.target.value })}>
         {(efforts.length ? efforts : ["medium"]).map((l) => <option key={l} value={l}>{l}</option>)}
       </select>
+      {providersLoading ? <span className="text-xs text-muted-foreground">Loading providers…</span> : null}
+      {providerError ? <span className="text-xs text-destructive">{providerError}</span> : null}
       {modelError ? <span className="text-xs text-destructive">{modelError}</span> : null}
     </span>
   );
@@ -574,7 +668,9 @@ function RolesView() {
       <SyncBar status={sync} busy={busy} onSync={() => void syncNow()} />
       <RoleJobs roles={roles ?? []} refreshKey={jobsKey} />
       <Dialog open={editing !== null} onOpenChange={(open) => { if (!open && !busy) setEditing(null); }}>
-        <DialogContent className="flex max-h-[92dvh] w-[96vw] max-w-3xl flex-col overflow-y-auto" hideCloseButton={busy} onInteractOutside={(e) => e.preventDefault()}>
+        <DialogContent className="flex max-h-[92dvh] w-[96vw] max-w-3xl flex-col overflow-y-auto" hideCloseButton={busy} onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => {
+          if (document.activeElement?.matches('input[role="combobox"][aria-expanded="true"]')) e.preventDefault();
+        }}>
           <DialogTitle>{editing === "new" ? "New agent" : "Edit agent"}</DialogTitle>
           <DialogDescription>Instructions, model, and permissions for this agent.</DialogDescription>
           {editing !== null && (editing === "new" || roles?.some((x) => x.id === editing)) ? (
