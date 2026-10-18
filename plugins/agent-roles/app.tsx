@@ -291,7 +291,8 @@ function SimpleModelPicker({ value, onChange }: {
   const efforts = (current?.supportedReasoningEfforts ?? [{ reasoningEffort: "medium" }]).map((e) => e.reasoningEffort).filter((e) => (REASONING_LEVELS as readonly string[]).includes(e));
   const status = modelsLoading ? "Loading models…" : `${matches.length} of ${models.length} models${matches.length > filtered.length ? " · refine search for more" : ""}${value.model ? ` · selected: ${value.model}` : ""}`;
   return (
-    <span className="flex flex-wrap items-center gap-2">
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="flex flex-wrap items-center gap-2">
       <select style={sel} value={value.providerId} onChange={(e) => onChange({ providerId: e.target.value, model: "", reasoningLevel: value.reasoningLevel })}>
         {providers.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
         {!providers.some((p) => p.id === value.providerId) ? <option value={value.providerId}>{value.providerId}</option> : null}
@@ -349,12 +350,13 @@ function SimpleModelPicker({ value, onChange }: {
             {!modelsLoading && filtered.length === 0 ? <li className="px-2 py-1.5 text-muted-foreground">No matching models.</li> : null}
           </ul>
         ) : null}
-        <span className="text-[0.65rem] text-muted-foreground">{status}</span>
       </span>
       <select style={sel} value={value.reasoningLevel} onChange={(e) => onChange({ ...value, reasoningLevel: e.target.value })}>
         {(efforts.length ? efforts : ["medium"]).map((l) => <option key={l} value={l}>{l}</option>)}
       </select>
       {providersLoading ? <span className="text-xs text-muted-foreground">Loading providers…</span> : null}
+      </span>
+      <span className="break-all text-[0.65rem] text-muted-foreground">{status}</span>
       {providerError ? <span className="text-xs text-destructive">{providerError}</span> : null}
       {modelError ? <span className="text-xs text-destructive">{modelError}</span> : null}
     </span>
@@ -404,8 +406,8 @@ function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; o
       </Field>
       <div className="flex flex-wrap items-end gap-x-10 gap-y-5">
         <Field label="Model">
-          <div className="flex items-center gap-2">
-            <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
+          <div className="flex items-start gap-2">
+            <label className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap text-sm">
               <RoleCheckbox disabled={busy} checked={inherit} onChange={(e) => {
                 if (e.target.checked) {
                   set("providerId", null);
